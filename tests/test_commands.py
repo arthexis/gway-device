@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 
-from gway_device import commands
+from gway_device import commands, monitor
 
 
 def test_hostname_is_short(monkeypatch):
@@ -66,15 +67,51 @@ def test_error_source_uses_most_common(monkeypatch):
     assert commands.error_source() == "alpha"
 
 
-def test_undervoltage_defaults_to_state(monkeypatch):
+def test_undervoltage_defaults_to_current_state(monkeypatch):
     monkeypatch.setattr(commands, "_run", lambda *_args, **_kwargs: "throttled=0x1")
     assert commands.undervoltage() is True
     assert commands.undervoltage("state") is True
-    assert commands.undervoltage("count") == 1
-    assert commands.undervoltage_count() == 1
 
 
-def test_historical_undervoltage_does_not_count_as_current(monkeypatch):
-    monkeypatch.setattr(commands, "_run", lambda *_args, **_kwargs: "throttled=0x10000")
-    assert commands.undervoltage() is False
-    assert commands.undervoltage("count") == 0
+def test_undervoltage_count_reads_monitor_state(monkeypatch, tmp_path: Path):
+    state_file = tmp_path / "undervoltage.json"
+    state_file.write_text('{"count": 3}\n', encoding="utf-8")
+    monkeypatch.setattr(commands, "UNDERVOLTAGE_STATE_FILE", state_file)
+    assert commands.undervoltage("count") == 3
+    assert commands.undervoltage_count() == 3
+
+
+def test_monitor_counts_only_false_to_true_transitions(monkeypatch, tmp_path: Path):
+    state_file = tmp_path / "undervoltage.json"
+    boot_file = tmp_path / "boot_id"
+    boot_file.write_text("boot-a\n", encoding="utf-8")
+    monkeypatch.setattr(monitor, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(monitor, "STATE_FILE", state_file)
+    monkeypatch.setattr(monitor, "BOOT_ID_FILE", boot_file)
+
+    samples = iter([False, True, True, False, True])
+    monkeypatch.setattr(monitor, "_undervoltage_current", lambda: next(samples))
+
+    for _ in range(5):
+        monitor.sample_once()
+
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state["count"] == 2
+    assert state["active"] is True
+
+
+def test_monitor_resets_count_for_new_boot(monkeypatch, tmp_path: Path):
+    state_file = tmp_path / "undervoltage.json"
+    boot_file = tmp_path / "boot_id"
+    boot_file.write_text("boot-b\n", encoding="utf-8")
+    state_file.write_text(
+        '{"boot_id": "boot-a", "count": 7, "active": true}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(monitor, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(monitor, "STATE_FILE", state_file)
+    monkeypatch.setattr(monitor, "BOOT_ID_FILE", boot_file)
+    monkeypatch.setattr(monitor, "_undervoltage_current", lambda: False)
+
+    state = monitor.sample_once()
+
+    assert state == {"boot_id": "boot-b", "count": 0, "active": False}
