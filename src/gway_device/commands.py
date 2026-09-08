@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -10,6 +11,8 @@ import subprocess
 import time
 from collections import Counter
 from pathlib import Path
+
+UNDERVOLTAGE_STATE_FILE = Path("/run/gway-device/undervoltage.json")
 
 
 def _run(args: list[str], *, timeout: float = 2.0) -> str:
@@ -209,17 +212,27 @@ def _undervoltage_current() -> bool:
     return bool(value & (1 << 0))
 
 
+def _undervoltage_count() -> int:
+    try:
+        state = json.loads(UNDERVOLTAGE_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    try:
+        return max(0, int(state.get("count", 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def undervoltage(metric: str = "state") -> bool | int:
-    """Return current under-voltage state; count is 1 when active, otherwise 0."""
-    active = _undervoltage_current()
+    """Return current state or monitored event count for this device boot."""
     normalized = metric.strip().lower().replace("_", "-")
     if normalized in {"state", "current"}:
-        return active
+        return _undervoltage_current()
     if normalized == "count":
-        return int(active)
+        return _undervoltage_count()
     raise ValueError(f"unknown undervoltage metric: {metric}")
 
 
 def undervoltage_count() -> int:
     """Zero-argument compatibility alias for current Sigil resolution."""
-    return int(undervoltage("count"))
+    return _undervoltage_count()
