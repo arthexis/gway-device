@@ -1,0 +1,7 @@
+[project]
+name = "device"
+aliases = ["gway-device"]
+
+[adapter]
+type = "python"
+module = "gway_device.commands"
