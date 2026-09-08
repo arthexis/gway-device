@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import socket
@@ -107,7 +106,17 @@ def cpu_percent() -> int:
 
 def _journal(priority: str) -> list[str]:
     output = _run(
-        ["journalctl", "--since", "-15min", "-p", priority, "--no-pager", "-q", "-n", "300"],
+        [
+            "journalctl",
+            "--since",
+            "-15min",
+            "-p",
+            priority,
+            "--no-pager",
+            "-q",
+            "-n",
+            "300",
+        ],
         timeout=3.0,
     )
     return [line for line in output.splitlines() if line.strip()]
@@ -118,14 +127,11 @@ def errors() -> int:
 
 
 def warnings() -> int:
-    return len(_journal("warning"))
+    return len(_journal("warning..warning"))
 
 
 def _source(line: str) -> str:
-    parts = line.split()
-    if len(parts) >= 5:
-        return parts[4].split("[", 1)[0].rstrip(":") or "-"
-    match = re.search(r"\s([\w@_.-]+)(?:\[\d+\])?:", line)
+    match = re.search(r"\s([\w@_.-]+)(?:\[\d+\])?:\s", line)
     return match.group(1) if match else "-"
 
 
@@ -148,5 +154,4 @@ def undervoltage() -> int:
     if not match:
         return 0
     value = int(match.group(1), 16)
-    # Bits 0 and 16 mean under-voltage now / has occurred since boot.
-    return int(bool(value & ((1 << 0) | (1 << 16))))
+    return int(bool(value & (1 << 0)))
