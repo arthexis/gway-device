@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import socket
@@ -44,7 +45,7 @@ def uptime() -> str:
     return f"{minutes}m"
 
 
-def memory_percent() -> int:
+def _memory_values() -> tuple[int, int]:
     values: dict[str, int] = {}
     try:
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
@@ -55,22 +56,49 @@ def memory_percent() -> int:
             if match:
                 values[key] = int(match.group(0))
     except OSError:
-        return 0
-    total = values.get("MemTotal")
-    available = values.get("MemAvailable")
-    if not total or available is None:
-        return 0
-    return round((1 - available / total) * 100)
+        return 0, 0
+    return values.get("MemTotal", 0), values.get("MemAvailable", 0)
 
 
-def disk_free_percent() -> int:
+def memory(metric: str = "percent") -> int:
+    """Return memory telemetry; sizes are MiB and percent means percent used."""
+    total_kib, free_kib = _memory_values()
+    used_kib = max(0, total_kib - free_kib)
+    normalized = metric.strip().lower().replace("_", "-")
+    if normalized == "percent":
+        return round((used_kib / total_kib) * 100) if total_kib else 0
+    if normalized == "total":
+        return round(total_kib / 1024)
+    if normalized == "free":
+        return round(free_kib / 1024)
+    if normalized == "used":
+        return round(used_kib / 1024)
+    raise ValueError(f"unknown memory metric: {metric}")
+
+
+def _disk_values(path: str = "/") -> tuple[int, int, int]:
     try:
-        usage = shutil.disk_usage("/")
+        usage = shutil.disk_usage(path)
     except OSError:
-        return 0
-    if not usage.total:
-        return 0
-    return round((usage.free / usage.total) * 100)
+        return 0, 0, 0
+    return usage.total, usage.used, usage.free
+
+
+def disk(metric: str = "free-percent", path: str = "/") -> int:
+    """Return disk telemetry; sizes are MiB."""
+    total, used, free = _disk_values(path)
+    normalized = metric.strip().lower().replace("_", "-")
+    if normalized == "free-percent":
+        return round((free / total) * 100) if total else 0
+    if normalized in {"percent", "used-percent"}:
+        return round((used / total) * 100) if total else 0
+    if normalized == "total":
+        return round(total / (1024**2))
+    if normalized == "free":
+        return round(free / (1024**2))
+    if normalized == "used":
+        return round(used / (1024**2))
+    raise ValueError(f"unknown disk metric: {metric}")
 
 
 def _cpu_times() -> tuple[int, int] | None:
@@ -89,7 +117,7 @@ def _cpu_times() -> tuple[int, int] | None:
     return idle, sum(values)
 
 
-def cpu_percent() -> int:
+def _cpu_percent() -> int:
     first = _cpu_times()
     if first is None:
         return 0
@@ -102,6 +130,30 @@ def cpu_percent() -> int:
     if total_delta <= 0:
         return 0
     return max(0, min(100, round((1 - idle_delta / total_delta) * 100)))
+
+
+def cpu(metric: str = "percent") -> int | float:
+    normalized = metric.strip().lower().replace("_", "-")
+    if normalized == "percent":
+        return _cpu_percent()
+    if normalized == "count":
+        return os.cpu_count() or 0
+    if normalized in {"load", "load1"}:
+        return round(os.getloadavg()[0], 2)
+    raise ValueError(f"unknown cpu metric: {metric}")
+
+
+# Temporary zero-argument aliases for today's GWAY-backed Sigil resolver.
+def memory_percent() -> int:
+    return memory("percent")
+
+
+def disk_free_percent() -> int:
+    return disk("free-percent")
+
+
+def cpu_percent() -> int:
+    return int(cpu("percent"))
 
 
 def _journal(priority: str) -> list[str]:
@@ -148,10 +200,26 @@ def failed_units() -> int:
     return sum(1 for line in output.splitlines() if line.strip())
 
 
-def undervoltage() -> int:
+def _undervoltage_current() -> bool:
     output = _run(["vcgencmd", "get_throttled"], timeout=1.0)
     match = re.search(r"0x([0-9a-fA-F]+)", output)
     if not match:
-        return 0
+        return False
     value = int(match.group(1), 16)
-    return int(bool(value & (1 << 0)))
+    return bool(value & (1 << 0))
+
+
+def undervoltage(metric: str = "state") -> bool | int:
+    """Return current under-voltage state; count is 1 when active, otherwise 0."""
+    active = _undervoltage_current()
+    normalized = metric.strip().lower().replace("_", "-")
+    if normalized in {"state", "current"}:
+        return active
+    if normalized == "count":
+        return int(active)
+    raise ValueError(f"unknown undervoltage metric: {metric}")
+
+
+def undervoltage_count() -> int:
+    """Zero-argument compatibility alias for current Sigil resolution."""
+    return int(undervoltage("count"))
