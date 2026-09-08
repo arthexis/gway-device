@@ -9,6 +9,13 @@ def test_hostname_is_short(monkeypatch):
     assert commands.hostname() == "gway-001"
 
 
+def test_model_reads_device_tree(monkeypatch, tmp_path: Path):
+    model_file = tmp_path / "model"
+    model_file.write_bytes(b"Raspberry Pi 4 Model B Rev 1.5\x00")
+    monkeypatch.setattr(commands, "MODEL_FILE", model_file)
+    assert commands.model() == "Raspberry Pi 4 Model B Rev 1.5"
+
+
 def test_uptime_formats_minutes(monkeypatch, tmp_path: Path):
     fake = tmp_path / "uptime"
     fake.write_text("3660.00 0.00\n", encoding="utf-8")
@@ -52,6 +59,25 @@ def test_cpu_metrics(monkeypatch):
     assert commands.cpu("count") == 4
     assert commands.cpu("load") == 1.25
     assert commands.cpu_percent() == 42
+
+
+def test_interface_prefers_boot_configuration(monkeypatch):
+    monkeypatch.setattr(commands, "_boot_config_text", lambda: "dtparam=i2c_arm=on\ndtparam=spi=off\n")
+    assert commands.interface("i2c") is True
+    assert commands.interface("spi") is False
+
+
+def test_interface_summary(monkeypatch):
+    states = {"i2c": True, "spi": True, "uart": False, "1wire": False}
+    original = commands.interface
+
+    def fake(name="summary"):
+        if name == "summary":
+            return original(name)
+        return states[name]
+
+    monkeypatch.setattr(commands, "interface", fake)
+    assert original("summary") == "i2c,spi"
 
 
 def test_error_source_uses_most_common(monkeypatch):
