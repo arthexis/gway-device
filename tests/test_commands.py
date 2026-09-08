@@ -12,7 +12,11 @@ def test_uptime_formats_minutes(monkeypatch, tmp_path: Path):
     fake = tmp_path / "uptime"
     fake.write_text("3660.00 0.00\n", encoding="utf-8")
     original = commands.Path
-    monkeypatch.setattr(commands, "Path", lambda value: fake if value == "/proc/uptime" else original(value))
+    monkeypatch.setattr(
+        commands,
+        "Path",
+        lambda value: fake if value == "/proc/uptime" else original(value),
+    )
     assert commands.uptime() == "1h1m"
 
 
@@ -38,6 +42,11 @@ def test_error_source_uses_most_common(monkeypatch):
     assert commands.error_source() == "alpha"
 
 
-def test_undervoltage_decodes_current_or_historical_bit(monkeypatch):
-    monkeypatch.setattr(commands, "_run", lambda *_args, **_kwargs: "throttled=0x10000")
+def test_undervoltage_reports_current_condition(monkeypatch):
+    monkeypatch.setattr(commands, "_run", lambda *_args, **_kwargs: "throttled=0x1")
     assert commands.undervoltage() == 1
+
+
+def test_historical_undervoltage_does_not_count_as_current(monkeypatch):
+    monkeypatch.setattr(commands, "_run", lambda *_args, **_kwargs: "throttled=0x10000")
+    assert commands.undervoltage() == 0
