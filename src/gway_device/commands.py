@@ -13,6 +13,9 @@ from collections import Counter
 from pathlib import Path
 
 UNDERVOLTAGE_STATE_FILE = Path("/run/gway-device/undervoltage.json")
+MODEL_FILE = Path("/proc/device-tree/model")
+CONFIG_FILE = Path("/boot/firmware/config.txt")
+LEGACY_CONFIG_FILE = Path("/boot/config.txt")
 
 
 def _run(args: list[str], *, timeout: float = 2.0) -> str:
@@ -31,6 +34,14 @@ def _run(args: list[str], *, timeout: float = 2.0) -> str:
 
 def hostname() -> str:
     return socket.gethostname().split(".")[0]
+
+
+def model() -> str:
+    try:
+        value = MODEL_FILE.read_bytes().decode("utf-8", errors="replace").rstrip("\x00\n")
+    except OSError:
+        value = ""
+    return value or "unknown"
 
 
 def uptime() -> str:
@@ -64,7 +75,6 @@ def _memory_values() -> tuple[int, int]:
 
 
 def memory(metric: str = "percent") -> int:
-    """Return memory telemetry; sizes are MiB and percent means percent used."""
     total_kib, free_kib = _memory_values()
     used_kib = max(0, total_kib - free_kib)
     normalized = metric.strip().lower().replace("_", "-")
@@ -88,7 +98,6 @@ def _disk_values(path: str = "/") -> tuple[int, int, int]:
 
 
 def disk(metric: str = "free-percent", path: str = "/") -> int:
-    """Return disk telemetry; sizes are MiB."""
     total, used, free = _disk_values(path)
     normalized = metric.strip().lower().replace("_", "-")
     if normalized == "free-percent":
@@ -146,6 +155,61 @@ def cpu(metric: str = "percent") -> int | float:
     raise ValueError(f"unknown cpu metric: {metric}")
 
 
+def _boot_config_text() -> str:
+    for path in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return ""
+
+
+def _config_enabled(key: str) -> bool | None:
+    text = _boot_config_text()
+    if not text:
+        return None
+    result: bool | None = None
+    pattern = re.compile(rf"^\s*dtparam\s*=\s*{re.escape(key)}\s*=\s*(on|off|1|0|true|false)\s*(?:#.*)?$", re.IGNORECASE)
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = pattern.match(line)
+        if match:
+            result = match.group(1).lower() in {"on", "1", "true"}
+    return result
+
+
+def interface(name: str = "summary") -> bool | str:
+    """Return GPIO interface enablement or a compact enabled-interface summary."""
+    normalized = name.strip().lower().replace("_", "-")
+    checks = {
+        "i2c": ("i2c_arm", Path("/dev/i2c-1")),
+        "spi": ("spi", Path("/dev/spidev0.0")),
+        "uart": (None, Path("/dev/serial0")),
+        "1wire": (None, Path("/sys/bus/w1/devices")),
+        "1-wire": (None, Path("/sys/bus/w1/devices")),
+    }
+    if normalized == "summary":
+        enabled = []
+        for item in ("i2c", "spi", "uart", "1wire"):
+            if interface(item) is True:
+                enabled.append(item)
+        return ",".join(enabled) if enabled else "-"
+    if normalized not in checks:
+        raise ValueError(f"unknown device interface: {name}")
+    config_key, runtime_path = checks[normalized]
+    configured = _config_enabled(config_key) if config_key else None
+    if configured is not None:
+        return configured
+    return runtime_path.exists()
+
+
+def interfaces() -> str:
+    """Zero-argument summary alias for current Sigil resolution."""
+    return str(interface("summary"))
+
+
 # Temporary zero-argument aliases for today's GWAY-backed Sigil resolver.
 def memory_percent() -> int:
     return memory("percent")
@@ -161,17 +225,7 @@ def cpu_percent() -> int:
 
 def _journal(priority: str) -> list[str]:
     output = _run(
-        [
-            "journalctl",
-            "--since",
-            "-15min",
-            "-p",
-            priority,
-            "--no-pager",
-            "-q",
-            "-n",
-            "300",
-        ],
+        ["journalctl", "--since", "-15min", "-p", priority, "--no-pager", "-q", "-n", "300"],
         timeout=3.0,
     )
     return [line for line in output.splitlines() if line.strip()]
@@ -224,7 +278,6 @@ def _undervoltage_count() -> int:
 
 
 def undervoltage(metric: str = "state") -> bool | int:
-    """Return current state or monitored event count for this device boot."""
     normalized = metric.strip().lower().replace("_", "-")
     if normalized in {"state", "current"}:
         return _undervoltage_current()
@@ -234,5 +287,4 @@ def undervoltage(metric: str = "state") -> bool | int:
 
 
 def undervoltage_count() -> int:
-    """Zero-argument compatibility alias for current Sigil resolution."""
     return _undervoltage_count()
