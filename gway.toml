@@ -5,3 +5,9 @@ aliases = ["gway-device"]
 [adapter]
 type = "python"
 module = "gway_device.commands"
+
+[service]
+description = "GWAY device event monitor"
+command = ["{python}", "-m", "gway_device.monitor"]
+restart = "on-failure"
+restart_sec = 2
