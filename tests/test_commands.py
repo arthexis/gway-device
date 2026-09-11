@@ -40,7 +40,9 @@ def test_memory_metrics(monkeypatch):
 
 def test_disk_metrics(monkeypatch):
     mib = 1024**2
-    monkeypatch.setattr(commands, "_disk_values", lambda _path="/": (100 * mib, 75 * mib, 25 * mib))
+    monkeypatch.setattr(
+        commands, "_disk_values", lambda _path="/": (100 * mib, 75 * mib, 25 * mib)
+    )
     assert commands.disk() == 25
     assert commands.disk("free-percent") == 25
     assert commands.disk("percent") == 75
@@ -62,7 +64,9 @@ def test_cpu_metrics(monkeypatch):
 
 
 def test_interface_prefers_boot_configuration(monkeypatch):
-    monkeypatch.setattr(commands, "_boot_config_text", lambda: "dtparam=i2c_arm=on\ndtparam=spi=off\n")
+    monkeypatch.setattr(
+        commands, "_boot_config_text", lambda: "dtparam=i2c_arm=on\ndtparam=spi=off\n"
+    )
     assert commands.interface("i2c") is True
     assert commands.interface("spi") is False
 
@@ -130,9 +134,7 @@ def test_monitor_resets_count_for_new_boot(monkeypatch, tmp_path: Path):
     state_file = tmp_path / "undervoltage.json"
     boot_file = tmp_path / "boot_id"
     boot_file.write_text("boot-b\n", encoding="utf-8")
-    state_file.write_text(
-        '{"boot_id": "boot-a", "count": 7, "active": true}\n', encoding="utf-8"
-    )
+    state_file.write_text('{"boot_id": "boot-a", "count": 7, "active": true}\n', encoding="utf-8")
     monkeypatch.setattr(monitor, "STATE_DIR", tmp_path)
     monkeypatch.setattr(monitor, "STATE_FILE", state_file)
     monkeypatch.setattr(monitor, "BOOT_ID_FILE", boot_file)
