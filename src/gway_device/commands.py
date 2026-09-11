@@ -169,7 +169,10 @@ def _config_enabled(key: str) -> bool | None:
     if not text:
         return None
     result: bool | None = None
-    pattern = re.compile(rf"^\s*dtparam\s*=\s*{re.escape(key)}\s*=\s*(on|off|1|0|true|false)\s*(?:#.*)?$", re.IGNORECASE)
+    pattern = re.compile(
+        rf"^\s*dtparam\s*=\s*{re.escape(key)}\s*=\s*(on|off|1|0|true|false)\s*(?:#.*)?$",
+        re.IGNORECASE,
+    )
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
